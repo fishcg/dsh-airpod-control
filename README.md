@@ -58,9 +58,13 @@ curl -s -X POST "http://127.0.0.1:<port>/dsh-airpod-control/setup/run" | jq
 ## 怎么用
 
 1. 戴好耳机，HeadOrbit 菜单栏图标显示已连接。
-2. 会话里出现审批卡片 / 提问卡片。
+2. 会话里出现审批卡片 / 提问卡片：`点头` 会按下的那个按钮（审批里的「允许」）会被**描边点亮**，
+   一眼看得出点头会选什么。
 3. **点头** = 允许（审批）或确认当前选项（提问）；**摇头** = 拒绝或切到下一个选项。
-4. 手势生效后卡片自动收起，工具继续跑。
+4. 手势一落定，卡片就收起（宿主结算后就收回），所以插件会补一句结果：
+   `已允许 <工具>` / `已拒绝 <工具>` / `已选择 <选项>`。这句话优先说在**小鲸鱼头顶的气泡**里
+   （装了 [`dsh-whale-widget`](https://www.npmjs.com/package/dsh-whale-widget) 时），
+   没装鲸鱼就退化成屏幕顶部的提示条——不然卡片消失得太快，人会不知道自己刚才选了什么。
 
 手势和网页按钮**同时有效**，谁先到算谁的：插件认领请求时也调用 `next()`，卡片照常渲染，
 你在页面上点「允许」和做一个手势是在赛跑。没有回答者时 DSH 本来就是 fail closed，本插件不改变这个性质。
@@ -68,13 +72,29 @@ curl -s -X POST "http://127.0.0.1:<port>/dsh-airpod-control/setup/run" | jq
 ### 顺手：按住 ← 或 → 说话
 
 官方的语音输入插件（`dsh-experimental-voice-input-bundle`）没有快捷键，只能点输入框旁边那个麦克风。
-本插件的浏览器半区补了一个：**按住 ← 或 → 开始录音，松开结束并转录**（长按 260ms 才启动，快速点一下还是正常移动光标），文字照常落进输入框草稿。
+本插件的浏览器半区补了一个：**同时按住 ← 和 → 开始录音，松开任意一个就结束并转录**，文字照常落进输入框草稿。
 
 - 没装官方语音插件时完全不生效，`⌃Space` 该干什么还是什么（只找得到按钮时才会拦截按键）。
-- 方向键用「长按」触发：点一下是移光标，按住超过 260ms 才开始录音；带 ⌘/⌃/⌥/⇧ 的组合一律放行。
-- 也保留 ⌃Space（按下即开始、松开即停止），不想长按的人可以用它。
+- 单个方向键完全不拦截（光标照常移动）；只有左右两个方向键**同时按住**时才录音。
+- 带 ⌘/⌃/⌥/⇧ 的组合一律放行。
+- 也保留 ⌃Space（按下即开始、松开即停止）作为备用。
 - 它会真的"点一下"那个麦克风按钮，所以屏幕上的录音状态、波形、取消按钮都是官方组件自己的，
   失败提示（没权限、没模型、转录失败）也照常显示。
+
+### 设置页
+
+**设置 → 左侧栏「AirPods 控制」**（右侧栏里和皮肤插件那几个并列）里能改手感，点保存即时生效，不用重启 DSH：
+
+| 项 | 作用 |
+| --- | --- |
+| 点头 / 摇头幅度 | 转多少度算一次手势；旁边两条进度条是**实时幅度**，边说边调最直观 |
+| 语音输入按键 | 按住 ← + →、⌃Space、或关掉 |
+| 高亮当前选项 | 摇头切选项时在卡片上圈出当前项 |
+| 界面语言 | 跟随系统 / 中文 / English |
+| 连续手势去重、只在 HeadOrbit 在线时接管 | 高级项，一般不用动 |
+
+界面语言默认问系统要，而不是看浏览器的 `navigator.language`——Electron 里那个值经常是
+`en-US`（这台中文 Mac 就是），照它判断会让中文用户看到英文菜单。
 
 ## 演示：点头 = 允许
 
@@ -98,7 +118,7 @@ curl -s -X POST "http://127.0.0.1:<port>/dsh-airpod-control/setup/run" | jq
 
 | 键 | 默认 | 说明 |
 | --- | --- | --- |
-| `enabled` | `false` | 关着的时候什么都不注册，等于没装 |
+| `enabled` | `true` | 关掉就什么都不注册，等于没装。默认开是因为「HeadOrbit 不在线就不碰请求」，而默认关着太脆：插件管理层重写 profile 层时会把用户手写的行抹掉，插件就静默失效了 |
 | `token` | `''` | 共享密钥。留空则自动生成到 `~/.dsh-airpod-control/token`（0600）；非空时以配置为准。请求需带 `X-HeadOrbit-Token` |
 | `nodAllows` | `true` | `false` 则反过来：摇头＝允许、点头＝拒绝 |
 | `claimQuestions` | `'auto'` | `'off'` 则完全不接模型的提问，只回答权限许可 |
@@ -155,11 +175,41 @@ $ curl -s -H "X-HeadOrbit-Token: $TOKEN" http://127.0.0.1:$DSH_WEB_PORT/dsh-airp
 
 ```bash
 cd dsh-airpod-control
-node --test test/plugin.test.js     # 45 个用例，手写假宿主，不需要真 DSH
+node --test test/plugin.test.js     # 52 个用例，手写假宿主，不需要真 DSH
 ```
 
 覆盖：审批允许/拒绝/超时/取消、提问（两选项与多选项光标）、请求竞态、token 与 Host/同站校验、
-自动生成 token、`/setup` 状态、卡片撤除的依据（`/last-decision`）、手势去抖等。
+自动生成 token、`/setup` 状态、卡片撤除的依据（`/last-decision`）、手势去抖、`/motion` 实时幅度、
+`/settings` 读写与夹取范围、网页半区在 zh/en 下都能加载且两份文案键一致。
+
+## 排障
+
+**插件像没装**（网页上没卡片、App 日志里 `无法连接服务器`）：先看它在不在。
+
+```console
+$ curl -s -o /dev/null -w '%{http_code}\n' "http://127.0.0.1:$DSH_WEB_PORT/dsh-airpod-control/setup"
+200     # 挂载了
+404     # 没挂载：看 profile 的 cordis.patch.yml 里 dsh-airpod-control 那行是不是被关掉/抹掉了
+```
+
+**按钮没高亮 / 结果气泡没出现**：先问浏览器那一半活着没有。
+
+```console
+$ curl -s "http://127.0.0.1:$DSH_WEB_PORT/dsh-airpod-control/client-state"
+{"version":"0.3.0","at":1792575600000,"bootAt":1792575590000,"boots":1,"notes":2,"lang":"zh","kind":"note","text":"已允许 Bash","channel":"whale"}
+```
+
+`boots: 0` 说明前端那一半根本没加载（改过前端代码要 ⌘R，改过宿主代码要重启）；
+`notes` 和 `text`/`channel` 是它最近一次说话的内容和走的通道（`whale` = 小鲸鱼气泡，`toast` = 顶部提示条），
+这样能分清「没触发」和「触发了但被鲸鱼的渲染盖掉」。
+
+**端口变了**：`~/.dsh-airpod-control/endpoint.json` 里的 `port` 必须等于当前 GUI 端口。
+插件启动后 10 分钟内会一直重试发布，之后任何一次请求也会顺手刷新；App 每轮轮询都会重读这个文件，
+所以 DSH 换端口不需要改 App 配置。
+
+**日志**：App 侧 `~/Library/Logs/HeadOrbit-DSHBridge.log`；宿主启动崩溃
+`~/Library/Logs/DeepSeek Harness/crash-*-web-boot.log`（`1 entry did not activate` 说明某个插件
+半区在 import 阶段抛了异常，整个条目会被停用）。
 
 ## 已知边界
 

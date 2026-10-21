@@ -1,19 +1,24 @@
 # dsh-airpod-control 的组装补丁：只声明这一行的存在与安全默认值。
 #
-# 默认关着、也没有共享密钥 —— 别人装上不会自己生效。真正启用的取值放在
-# profile 的用户层（~/.dsh/profiles/<profile>/cordis.patch.yml）:
+# 默认启用。安全边界不靠这个开关，靠「HeadOrbit 在线」：没装 App、没戴耳机、
+# 没在追踪时插件一行都不碰，审批卡片照旧由网页回答，所以「装了但没配对」是安全的。
+# 反过来，写死成默认关着很脆：插件管理层重写 profile 层的 cordis.patch.yml 时
+# 会把用户手写的那几行抹掉（本机实测过），插件就会静默失效、连端点都不注册。
+#
+# 想停用就在 profile 的用户层写 enabled: false（或直接在插件管理里关掉）：
 #
 #   - id: dsh-airpod-control
 #     config:
-#       enabled: true
+#       enabled: false
 #       token: <和 HeadOrbit「DSH」设置页里填的同一个随机串>
 #
-# token 是本地共享密钥：没有它，本机任何进程都能伪造一次「点头」。
+# token 是本地共享密钥：没有它，本机任何进程都能伪造一次「点头」。留空则自动生成到
+# ~/.dsh-airpod-control/token（0600），并把端口 + token 一起写进 endpoint.json 给 App 读。
 - insert:
     - id: dsh-airpod-control
       name: 'dsh-airpod-control'
       config:
-        enabled: false
+        enabled: true
         token: ''
         # nodAllows: true        # 反过来就是「摇头＝允许」
         # timeoutMs: 120000      # 一直没人点头时，多久自动拒绝
