@@ -1,0 +1,35 @@
+{
+  "name": "dsh-head-gesture",
+  "version": "0.1.1",
+  "private": true,
+  "description": "Answer DeepSeek Harness permission prompts and questions with head gestures from HeadOrbit (nod = allow / confirm, shake = reject / next option).",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test test/plugin.test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-session"
+      ]
+    }
+  }
+}
