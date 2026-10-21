@@ -299,7 +299,9 @@ test('一个请求只结算一次：结算之后再来的手势只报「没人�
 test('已经有请求在等时，第二个请求交给下一个回答者', async () => {
   const host = start()
   const first = host.askApproval({ callId: 'call-1' })
-  assert.equal(host.askApproval({ callId: 'call-2' }), undefined)
+  // 让位 = 直接返回 next() 那个 promise（网页卡片的答案会从这条链路回来），不再自造 undefined
+  assert.equal(host.browserCalls(), 1)
+  assert.ok(host.askApproval({ callId: 'call-2' }) instanceof Promise)
   await host.request('POST', '/dsh-airpod-control/gesture', { body: { gesture: 'nod' } })
   assert.equal(await first, 'allowed-once')
 })
@@ -509,7 +511,8 @@ test('一批多个问题：一次手势把整批答完，逐题按自己的选�
 
 test('选项多于八个、或 claimQuestions=off：交给下一个回答者（网页卡片照旧）', async () => {
   const tooMany = start()
-  assert.equal(
+  // 9 个选项超出「摇头切换」能表达的范围：不认领，原样让给网页卡片
+  assert.ok(
     tooMany.askQuestion({
       questions: [
         {
@@ -518,11 +521,12 @@ test('选项多于八个、或 claimQuestions=off：交给下一个回答者（�
           options: Array.from({ length: 9 }, (_, index) => ({ label: `选项${String(index + 1)}` })),
         },
       ],
-    }),
-    undefined,
+    }) instanceof Promise,
   )
 
   const off = start({ claimQuestions: 'off' })
+  // 关掉提问通道时连监听器都不注册：请求根本不经过插件
+  assert.equal(off.browserCalls(), 0)
   assert.equal(off.askQuestion(), undefined)
   assert.equal((await off.request('GET', '/dsh-airpod-control/health')).body.hasQuestionAnswerer, false)
 })
@@ -689,9 +693,10 @@ test('提问优先于审批：两边都在等时，手势先答提问', async ()
 
 test('HeadOrbit 从没轮询过：请求原样交给网页卡片，手势槽也不占', async () => {
   const host = start({ headOrbitOnline: false })
-  assert.equal(host.askApproval(), undefined)
-  assert.equal(host.askQuestion(), undefined)
-  assert.equal(host.browserCalls(), 0)
+  // 认领 0 次，全部原样交给链路后面的回答者（浏览器卡片），自己不自造答案
+  assert.ok(host.askApproval() instanceof Promise)
+  assert.ok(host.askQuestion() instanceof Promise)
+  assert.equal(host.browserCalls(), 2)
   // 网页自己也答不上来时，插件不该是那个把结论定成 rejection 的人
   const state = (await host.request('GET', '/dsh-airpod-control/state')).body
   assert.equal(state.waiting, false)
@@ -706,7 +711,7 @@ test('HeadOrbit 掉线（超过 aliveWindowMs 没轮询）后同样让位', asyn
   // 注意：这次 /state 又把它算成在线了（轮询即心跳），所以先派发再断言
   const offline = start({ aliveWindowMs: 1_000 })
   await new Promise((r) => setTimeout(r, 1_100))
-  assert.equal(offline.askApproval(), undefined)
+  assert.ok(offline.askApproval() instanceof Promise)
 })
 
 test('requireHeadOrbit=false 时不等心跳：没有 HeadOrbit 也能用手势（用 curl 验的时候开）', async () => {
