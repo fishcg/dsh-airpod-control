@@ -1,6 +1,6 @@
 {
   "name": "dsh-airpod-control",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Control DeepSeek Harness from AirPods head gestures (via HeadOrbit): nod = allow / confirm, shake = reject / next option. Ships a one-click installer for the menu-bar app.",
   "type": "module",
   "main": "lib/index.js",
