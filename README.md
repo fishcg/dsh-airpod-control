@@ -1,91 +1,79 @@
 # dsh-airpod-control
 
-用头部手势回答 DeepSeek Harness 的两件事，同一套动作：
+用 **AirPods 的头部动作**回答 DeepSeek Harness 里的两件事，同一套手势：
 
 | 场景 | 点头 | 摇头 |
 | --- | --- | --- |
 | **权限许可**（approval） | 允许（`allowed-once`） | 拒绝 |
-| **模型提问**（`ask_user_question`） | 是 / 继续 / 全选 | 否 / 取消 / 全不选 |
+| **模型提问**（`ask_user_question`，3 个以上选项） | 确认当前项 | 切到下一项 |
+
+<p align="center">
+  <img src="docs/approval-card.png" alt="审批卡片：点头允许、摇头拒绝" width="720">
+</p>
 
 手势由 [HeadOrbit](https://github.com/Cogria-AI/HeadOrbit)（AirPods 头部追踪的 macOS 菜单栏 App）识别，
-通过本机回环 HTTP 送到这个插件；插件分别注册成审批回答者与提问回答者（approval / user-questions answerer）。
+经本机回环 HTTP 送到这个插件。插件在这里做了四件事：
 
-## 装好它（不用手动下载 App）
+- **自动装好 HeadOrbit**：插件自带安装器，页面右下角一张卡片就能下载、安装、写配置、启动、等心跳；
+  装到 `~/Applications/HeadOrbit.app`，端口和 token 全自动，用户不用手填。
+- **当审批回答者**：只有真有请求在等、且 HeadOrbit 在线时才认领，否则一行都不碰。
+- **当提问回答者**：点头/摇头答题；3 个以上选项时摇头切换、点头确认。
+- **手势答完撤掉网页卡片**：插件带一个浏览器半区，把已经被手势结算的那张卡片收掉，
+  不会出现「点头同意了、卡片还挂在页面上」。
 
-插件自带安装器：HeadOrbit 没装、或装了没连上时，DSH 页面右下角会出现一张卡片，
-点「一键安装并配置」即可 —— 下载、装到 `~/Applications`、把端口和 token 写进它的偏好、启动、等心跳，
-全部自动完成。系统权限（「动作与健身」）只能由系统弹窗授予，卡片上给了直接跳到系统设置的按钮。
+## 安装
+
+从插件中心（或命令行）装：
+
+```bash
+dsh plugin --profile desktop add dsh-airpod-control
+# 从源码装：
+dsh plugin --profile desktop add github:fishcg/dsh-airpod-control
+```
+
+装完重启 DSH，打开任意会话，右下角会出现「用点头 / 摇头回答 DSH」的卡片，点一下即可：
+
+1. 下载 HeadOrbit（MIT，源码在 [fishcg/HeadOrbit-dsh](https://github.com/fishcg/HeadOrbit-dsh)）并装到 `~/Applications`
+2. 把 DSH 的端口和共享 token 写进它的偏好，启动它
+3. 等它开始轮询（说明链路通了）
+4. 引导去「系统设置 → 隐私与安全性 → 动作与健身」给 HeadOrbit 打勾（**只能由系统弹窗授予**，所以这一步需要你点一下）
 
 不想点卡片也可以一条命令：
 
 ```bash
-# <port> 就是 DSH 的 web 端口（浏览器地址栏里那个）
 curl -s -X POST "http://127.0.0.1:<port>/dsh-airpod-control/setup/run" | jq
 ```
 
-共享 token 也不需要你手填：配置里留空时会自动生成一份，落在 `~/.dsh-airpod-control/token`
+共享 token 也不需要手填：配置里留空时会自动生成一份，落在 `~/.dsh-airpod-control/token`
 （0600），安装器会把同一个值写进 HeadOrbit。
 
-<img src="docs/install-card.png" alt="一键安装卡片" width="420">
+> 首次使用前请戴好 AirPods（Pro / 3 / 4 / Beats 等支持头部追踪的型号），并在 HeadOrbit 设置里确认「已连接」。
 
-- **手势和网页按钮同时有效，谁先到算谁的**：认领请求的同时也调用 `next()`，所以网页那张卡片照常
-  渲染；你在页面上点「允许」和做一个手势是在赛跑。没有回答者时 DSH 本来就是 fail closed，本插件不改变这个性质。
-- **只有 HeadOrbit 在线时才抢答**：HeadOrbit 每 0.75 秒 `GET /state`，这就是它的心跳；超过
-  `aliveWindowMs` 没动静（没开 App / 没戴耳机 / 没在追踪）时插件一行都不碰，网页卡片完全按原样工作。
-- 许可到时间没人做手势（默认 **10 分钟**）按**拒绝**收场，不会把工具调用无限挂着；这期间页面上那张
-  卡片一直有效，在页面上点按钮和做手势是同一场比赛。
-- 提问答不了的手势组合（多于 8 个选项、或一批里有多选题答不了）、以及 `claimQuestions: off` 时，整个提问都不认领，
-  交给网页那张卡片按原样处理。
-- **手势答完的卡片会自动消失**：插件带一个浏览器半区（`lib/client.js`，`package.json` 里的 `dsh.client`
-  声明）。DSH 结算请求时只会结束宿主那一份，网页上的卡片不会自己收到通知，所以这个半区每 0.7 秒看一次
-  「有没有正在等答的卡片」，只在有的时候读一次 `/last-decision`，发现这次请求已经被手势/按键结算过
-  （结算时间不早于卡片出现的时刻、类型对得上）就把卡片撤掉。
-- 浏览器半区是手写 CJS（`window.__ModuleLoader__.load({ id, factory })`、零构建、不 import 任何
-  `@deepseek-ai` 值），改完**要重启 DSH** 才会重新下发；宿主那半边的改动同理。
+## 怎么用
 
-## 安装（本机 profile）
+1. 戴好耳机，HeadOrbit 菜单栏图标显示已连接。
+2. 会话里出现审批卡片 / 提问卡片。
+3. **点头** = 允许（审批）或确认当前选项（提问）；**摇头** = 拒绝或切到下一个选项。
+4. 手势生效后卡片自动收起，工具继续跑。
 
-在 `~/.dsh/profiles/<profile>/` 下：
-
-```jsonc
-// package.json
-"dependencies": { "dsh-airpod-control": "link:/Users/fish/dsh-airpod-control" },
-"dsh": { "profile": { "bundles": ["...", "dsh-airpod-control"] } }
-```
-
-```yaml
-# cordis.patch.yml —— 插件那一行由它自己的 bundle 补丁插入，这里只覆盖本机取值
-- id: dsh-airpod-control
-  config:
-    enabled: true
-    # token 可以留空：插件会自己生成一份并写进 HeadOrbit
-```
-
-然后 `CI=true pnpm install` 并重启 DSH。（`package.json` 里的依赖是 `link:` 时不用重新装，
-但 profile 的 `dsh.profile.bundles` 变了就一定要重启，bundle 层是启动时组装的。）
-
-> 插件包自己的 `package.json` 必须声明 `dsh.bundle.patch`，否则 DSH 会**静默跳过**这一行：
-> 启动日志里只有一句 `dsh: skipping profile bundle "<name>": ... declares no dsh.bundle in its package.json`，
-> 表现就是路由 404、像没装一样。`node .../dsh/lib/bin.js --profile web --dump-config` 可以核对最终组合树。
+手势和网页按钮**同时有效**，谁先到算谁的：插件认领请求时也调用 `next()`，卡片照常渲染，
+你在页面上点「允许」和做一个手势是在赛跑。没有回答者时 DSH 本来就是 fail closed，本插件不改变这个性质。
 
 ## 配置
+
+在 profile 的 `cordis.patch.yml` 里覆盖（都有安全默认值）：
 
 | 键 | 默认 | 说明 |
 | --- | --- | --- |
 | `enabled` | `false` | 关着的时候什么都不注册，等于没装 |
 | `token` | `''` | 共享密钥。留空则自动生成到 `~/.dsh-airpod-control/token`（0600）；非空时以配置为准。请求需带 `X-HeadOrbit-Token` |
-| `nodAllows` | `true` | `false` 则反过来：摇头＝允许、点头＝拒绝（提问也一起反过来） |
+| `nodAllows` | `true` | `false` 则反过来：摇头＝允许、点头＝拒绝 |
 | `claimQuestions` | `'auto'` | `'off'` 则完全不接模型的提问，只回答权限许可 |
-| `questionTimeoutMs` | `600000` | 提问没人答时多久按「超时」结算（工具据此返回 pending，不卡死这一轮） |
-| `yesLabel` / `noLabel` | `'是'` / `'否'` | 自由文本提问没有选项时，点头/摇头落成的自定义回答 |
-| `timeoutMs` | `600000` | 一直没人做手势时多久按「拒绝」结算 |
-| `aliveWindowMs` | `6000` | 多久没收到 HeadOrbit 的心跳就认为它不在线，从而完全不抢答 |
-| `requireHeadOrbit` | `true` | `false` 时不看心跳、永远抢答。**用 curl 验一遍、或 HeadOrbit 还没构建好时**开它 |
-| `debounceMs` | `600` | 两次手势之间的最小间隔，防止识别抖动给两个答案 |
-| `gestureTtlMs` | `2000` | 手势自带 `ttlMs` 的默认上限 |
-| `logHeadlines` | `true` | 把 asked / answered / gesture 摘要写进宿主日志 |
-| `eventLimit` | `50` | `/events` 保留的流水条数 |
-| `maxParamsChars` | `500` | `/state` 里回显工具参数的长度上限 |
+| `timeoutMs` | `600000` | 审批没人理时的兜底（按拒绝结算） |
+| `questionTimeoutMs` | `600000` | 提问没人理时的兜底（工具返回 pending，不是跳过） |
+| `requireHeadOrbit` | `true` | `false` 时不看心跳、永远抢答（只建议自测时用） |
+| `aliveWindowMs` | `6000` | HeadOrbit 多久没轮询就当它不在线 |
+| `debounceMs` | `200` | 两次手势之间的最小间隔 |
 
 ## 端点
 
@@ -100,65 +88,51 @@ curl -s -X POST "http://127.0.0.1:<port>/dsh-airpod-control/setup/run" | jq
 | `GET` | `/events` | 最近的事件流水，排查用 |
 | `GET` | `/last-decision` | **免 token**：最近一次手势/按键结算了哪个请求（浏览器半区据此撤卡片） |
 | `GET` | `/cursor` | **免 token**：当前光标落在第几项（只回序号与那一项的文字） |
-| `POST` | `/gesture` | `{ "gesture": "nod" \| "shake", "ttlMs": 2000, "requestId"?: "q1" }` |
-| `POST` | `/answer` | `{ "decision": "allow" \| "reject" \| "select:N", "requestId"?: "q1" }`，没有耳机时的等价入口；`select:N` 直接点名第 N 个选项 |
-| `GET` | `/setup` | **免 token**：`{ app: { installed, running }, bridge, alive, tokenConfigured, last, running }`，安装卡片靠它决定要不要出现 |
-| `POST` | `/setup/run` | **免 token**：下载 + 安装 + 写配置 + 启动 + 等心跳；`{ reinstall?: true }`。返回逐步状态 `steps[]` |
+| `GET` | `/setup` | **免 token**：`{ app: { installed, running }, bridge, alive, tokenConfigured, last, running }` |
+| `POST` | `/setup/run` | **免 token**：下载 + 安装 + 写配置 + 启动 + 等心跳；`{ reinstall?: true }`，返回逐步状态 `steps[]` |
 | `POST` | `/setup/motion` | **免 token**：打开系统设置的「动作与健身」隐私页 |
+| `POST` | `/gesture` | `{ "gesture": "nod" \| "shake", "ttlMs": 2000, "requestId"?: "q1" }` |
+| `POST` | `/answer` | `{ "decision": "allow" \| "reject" \| "select:N", "requestId"?: "q1" }`，没有耳机时的等价入口 |
 
 `/state` 里 `kind` 是 `"approval"` 或 `"question"`；等提问时 `question` 会带上题目与选项
-（`{ requestId, label, count, questions, deadlineAt }`）。浏览器半区拿 `question.cursor`
-在网页卡片上把「现在点头会选中哪一项」圈出来。
-带 `requestId` 的调用是网页卡片回的答案，id 对不上会得到 `409 { stale: true }` —— 不会把旧卡片的选择
-安到下一个问题上。
-
-返回值里 `accepted: true` 才表示这次手势真的被采纳了：
-
-端口就是 DSH 自己的 GUI 端口（`dsh web` 启动时打印的那个）；插件不开新端口。
+（`{ requestId, label, count, questions, deadlineAt, cursor }`）。浏览器半区拿 `question.cursor`
+在网页卡片上把「现在点头会选中哪一项」圈出来。带 `requestId` 的调用是网页卡片回的答案，
+id 对不上会得到 `409 { stale: true }`。
 
 ```console
 $ curl -s -H "X-HeadOrbit-Token: $TOKEN" http://127.0.0.1:$DSH_WEB_PORT/dsh-airpod-control/health
 {"ok":true,"plugin":"dsh-airpod-control","version":"0.2.0","hasToken":true,"hasApprovalAnswerer":true,"hasQuestionAnswerer":true,"headOrbitAlive":true,"headOrbitWindowMs":6000,"waiting":false,"waitingKind":null,"answered":3,"ignored":0}
 ```
 
+端口就是 DSH 自己的 GUI 端口（`dsh web` 启动时打印的那个）；插件不开新端口。
+
 ## 安全性（值得说清楚）
 
+- 不自己开端口：复用宿主已有的 webServer 路由，因此天然只听 127.0.0.1。
+- 必须有共享密钥：token 为空时自动生成一份（0600），并要求请求带 `X-HeadOrbit-Token`，
+  所以本机别的进程即使能访问这个端口也伪造不了答案。
 - `/setup*` 是免 token 的（浏览器拿不到 token），因此只接受**回环 Host + 同站请求**；
   它做的都是固定参数的本机动作（`defaults` / `ditto` / `open`），请求内容不会进 shell。
-  装上之后，任何本机进程仍然可以调它重装 —— 这在能读你用户目录的进程面前不算新增权限。
-
-这是「从本机网络改变一次授权决定」，所以：
-
-- 不自己开端口，复用宿主 webServer，天然只听回环；
-- 必须有共享密钥，本机其它进程即使能访问这个端口也伪造不了答案；
-- 只回答正在等待中的那一次请求，一次请求只结算一次，过期手势不采纳；
-- 拒绝 Host 不是回环、`Sec-Fetch-Site: cross-site` 的请求；
-- **它仍然是便利层，不是安全边界**：token 存在 profile 配置里，本机任何能读该文件的进程都能拿到。
-  真正的护栏是 DSH 自身的审批语义（`allowed-once` 只授权这一次工具调用）。
+  装上之后任何本机进程仍然可以调它重装 —— 这在能读你用户目录的进程面前不算新增权限。
+- 只回答「正在等待中的那一次请求」：过期的、没有请求在等的、手势与映射不符的，一律忽略；
+  一次请求只会被结算一次。
+- 没有回答者时 DSH 本来就会 fail closed，本插件不改变这一点。
 
 ## 测试
 
 ```bash
-node --test test/plugin.test.js  # 45 个用例：许可/提问两条路、在线判定、与网页卡片赛跑、超时、中止、鉴权、卸载
-node scripts/demo.js             # 起一个假宿主，走一遍「点头＝允许」+「点头＝同意部署」
-node scripts/demo.js --reject    # 摇头那条路
-node scripts/demo.js --select=0  # 没有耳机时的等价入口：直接选第 0 个选项
+cd dsh-airpod-control
+node --test test/plugin.test.js     # 45 个用例，手写假宿主，不需要真 DSH
 ```
 
-选项映射的规则（`gestureOptionIndexes`，lib/index.js:80）：模型用 `intent.approve` 指明「同意」是哪个
-label 时以它为准（`dsh-client-ui-user-questions` 找「同意」按钮用的也是同一条规则）；否则按选项文字里
-的肯定/否定词猜；再不然就「点头＝第一项、摇头＝最后一项」。
-
-**选项多于两个**（只有一个问题、不是多选、选项不超过 8 个）时改成「摇头切换、点头确认」：光标初始停在
-第一项（`intent.approve` 存在时停在「同意」那一项），每摇一次头往后挪一项、到底再回到第一项，点头＝确认
-当前项。不做自动落定——用户点头之前问题一直挂着，由 `questionTimeoutMs` 兜底。光标位置通过 `/state` 的
-`question.cursor` / `question.selectedLabel` 暴露；浏览器半区据此在网页卡片的选项按钮上**画高亮边框**，
-鼠标点那一项就是直接跳到它（`POST /cursor` 带 `{ index }`）。
-两个选项的问题仍然是一步到位（点头＝同意、摇头＝不同意），和审批保持同一套方向语义。
+覆盖：审批允许/拒绝/超时/取消、提问（两选项与多选项光标）、请求竞态、token 与 Host/同站校验、
+自动生成 token、`/setup` 状态、卡片撤除的依据（`/last-decision`）、手势去抖等。
 
 ## 已知边界
 
-- 提问被手势认领后，网页卡片仍然会渲染（我们同时调了 `next()`），所以两边都能答；
-  但**卡片上的按钮和手势是两条独立的路**，卡片一旦点过，手势就作废（`ignored` 计数 +1，流水里有记录）。
-- 一次只等一个请求：手势优先级是「提问 > 许可」，两个同时挂着时先答提问，许可继续等下一次手势。
-- 提问超时按 `ASK_TIMED_OUT` 抛，工具返回 pending（不是「跳过」）；这之后用户仍可在 DSH 里补答。
+- 只支持 macOS（HeadOrbit 是 macOS 菜单栏 App，用 CoreMotion 读 AirPods）。
+- 需要支持头部追踪的耳机；没有耳机时插件不会认领任何请求，行为与未安装一致。
+- 手势识别由 HeadOrbit 负责，阈值可在 App 里按自己的幅度校准（点头约 12°、摇头约 19°）。
+- 插件和网页卡片是竞态关系：两边同时给答案时，先到的那个生效。
+- 安装器下载的是 `fishcg/HeadOrbit-dsh` 的 latest release（ad-hoc 签名、未公证），
+  安装后会自动去掉 quarantine 属性；签名/公证版本后续再补。
