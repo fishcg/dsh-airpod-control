@@ -8,7 +8,7 @@
 | **模型提问**（`ask_user_question`，3 个以上选项） | 确认当前项 | 切到下一项 |
 
 <p align="center">
-  <img src="docs/approval-card.png" alt="审批卡片：点头允许、摇头拒绝" width="720">
+  <img src="https://raw.githubusercontent.com/fishcg/dsh-airpod-control/master/docs/approval-card.png" alt="审批卡片：点头允许、摇头拒绝" width="720">
 </p>
 
 手势由 [HeadOrbit](https://github.com/Cogria-AI/HeadOrbit)（AirPods 头部追踪的 macOS 菜单栏 App）识别，
@@ -65,9 +65,9 @@ curl -s -X POST "http://127.0.0.1:<port>/dsh-airpod-control/setup/run" | jq
 
 下面是一段 5 秒的真机录屏——审批卡片弹出后点一次头，卡片自动收起、命令随即执行（摇头就是「拒绝」）：
 
-![点头批准演示](docs/demo.gif)
+![点头批准演示](https://raw.githubusercontent.com/fishcg/dsh-airpod-control/master/docs/demo.gif)
 
-[下载 mp4 原片](docs/demo.mp4)
+[下载 mp4 原片](https://raw.githubusercontent.com/fishcg/dsh-airpod-control/master/docs/demo.mp4)
 
 ## 截图
 
@@ -75,7 +75,7 @@ curl -s -X POST "http://127.0.0.1:<port>/dsh-airpod-control/setup/run" | jq
 
 | 一键安装引导 | 审批卡片 |
 | --- | --- |
-| <img src="docs/install-card.png" width="360"> | <img src="docs/approval-card.png" width="360"> |
+| <img src="https://raw.githubusercontent.com/fishcg/dsh-airpod-control/master/docs/install-card.png" width="360"> | <img src="https://raw.githubusercontent.com/fishcg/dsh-airpod-control/master/docs/approval-card.png" width="360"> |
 
 ## 配置
 
