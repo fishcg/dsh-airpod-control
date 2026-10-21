@@ -59,6 +59,14 @@ curl -s -X POST "http://127.0.0.1:<port>/dsh-airpod-control/setup/run" | jq
 手势和网页按钮**同时有效**，谁先到算谁的：插件认领请求时也调用 `next()`，卡片照常渲染，
 你在页面上点「允许」和做一个手势是在赛跑。没有回答者时 DSH 本来就是 fail closed，本插件不改变这个性质。
 
+## 截图
+
+首次打开时右下角会自动出现安装卡片（左）；装好后审批卡片长这样（右）：
+
+| 一键安装引导 | 审批卡片 |
+| --- | --- |
+| <img src="docs/install-card.png" width="360"> | <img src="docs/approval-card.png" width="360"> |
+
 ## 配置
 
 在 profile 的 `cordis.patch.yml` 里覆盖（都有安全默认值）：
