@@ -1,9 +1,12 @@
 /**
- * dsh-head-gesture 的行为测试：只依赖 node:test 和一个手写的假宿主上下文，
+ * dsh-airpod-control 的行为测试：只依赖 node:test 和一个手写的假宿主上下文，
  * 不需要 @deepseek-ai/cordis —— 插件本身也只用到 ctx 上传进来的那几个能力。
  */
 
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import { test } from 'node:test'
 
 import plugin from '../lib/index.js'
@@ -105,7 +108,7 @@ function makeHost() {
 
   /** 模拟 HeadOrbit 的一次 /state 轮询：插件就是靠它判断「耳机那边还在线」 */
   function pollState() {
-    const handler = routes.get(`exact:${'/dsh-head-gesture/state'}`)
+    const handler = routes.get(`exact:${'/dsh-airpod-control/state'}`)
     if (handler === undefined) return
     handler(
       { method: 'GET', headers: { host: '127.0.0.1:19387', 'x-headorbit-token': TOKEN } },
@@ -203,19 +206,36 @@ test('关闭时什么都不注册', () => {
   assert.equal(host.listeners.length, 0)
 })
 
-test('开着但没配 token 时不认领任何审批请求', () => {
+test('没配 token 时自动生成一份共享 token，并用它认领请求', async () => {
+  const file = path.join(os.homedir(), '.dsh-airpod-control', 'token')
+  const existed = fs.existsSync(file)
+  const before = existed ? fs.readFileSync(file, 'utf8') : null
+
   const host = start({ token: '' })
-  assert.equal(host.askApproval(), undefined)
-  assert.equal(host.listeners.length, 0)
+  // 自动生成之后就该照常认领（审批 + 提问两个通道）
+  assert.equal(host.listeners.length, 2)
+
+  const generated = fs.readFileSync(file, 'utf8').trim()
+  assert.ok(generated.length >= 16, 'token should be generated on first run')
+
+  // 认证在读 body 之前就挡掉了，所以这里不带 body
+  const bad = await host.request('POST', '/dsh-airpod-control/gesture', { token: 'nope' })
+  assert.equal(bad.status, 401)
+  const ok = await host.request('POST', '/dsh-airpod-control/gesture', { body: { gesture: 'nod' }, token: generated })
+  assert.equal(ok.status, 200)
+
+  // 别把用户机器上真的 token 弄脏
+  if (existed) fs.writeFileSync(file, before)
+  else fs.rmSync(path.dirname(file), { recursive: true, force: true })
 })
 
 test('没有请求在等的时候，手势不会造成任何答案', async () => {
   const host = start()
-  const state = await host.request('GET', '/dsh-head-gesture/state')
+  const state = await host.request('GET', '/dsh-airpod-control/state')
   assert.equal(state.status, 200)
   assert.equal(state.body.waiting, false)
 
-  const gesture = await host.request('POST', '/dsh-head-gesture/gesture', { body: { gesture: 'nod' } })
+  const gesture = await host.request('POST', '/dsh-airpod-control/gesture', { body: { gesture: 'nod' } })
   assert.equal(gesture.status, 200)
   assert.equal(gesture.body.accepted, false)
 })
@@ -224,23 +244,23 @@ test('点头＝允许：先认领请求，再被手势结算 allowed-once', asyn
   const host = start()
   const answer = host.askApproval()
 
-  const waiting = await host.request('GET', '/dsh-head-gesture/state')
+  const waiting = await host.request('GET', '/dsh-airpod-control/state')
   assert.equal(waiting.body.waiting, true)
   assert.equal(waiting.body.label, 'Bash')
   assert.equal(waiting.body.canAnswer, true)
   assert.ok(waiting.body.params.includes('rm -rf'))
 
-  const gesture = await host.request('POST', '/dsh-head-gesture/gesture', { body: { gesture: 'nod', ttlMs: 1_000 } })
+  const gesture = await host.request('POST', '/dsh-airpod-control/gesture', { body: { gesture: 'nod', ttlMs: 1_000 } })
   assert.equal(gesture.body.accepted, true)
   assert.equal(gesture.body.decision, 'allowed-once')
   assert.equal(await answer, 'allowed-once')
-  assert.equal((await host.request('GET', '/dsh-head-gesture/state')).body.waiting, false)
+  assert.equal((await host.request('GET', '/dsh-airpod-control/state')).body.waiting, false)
 })
 
 test('摇头＝拒绝', async () => {
   const host = start()
   const answer = host.askApproval()
-  const gesture = await host.request('POST', '/dsh-head-gesture/gesture', { body: { gesture: 'shake' } })
+  const gesture = await host.request('POST', '/dsh-airpod-control/gesture', { body: { gesture: 'shake' } })
   assert.equal(gesture.body.decision, 'rejected')
   assert.equal(await answer, 'rejected')
 })
@@ -248,7 +268,7 @@ test('摇头＝拒绝', async () => {
 test('nodAllows=false 时反过来：摇头＝允许', async () => {
   const host = start({ nodAllows: false })
   const answer = host.askApproval()
-  const gesture = await host.request('POST', '/dsh-head-gesture/gesture', { body: { gesture: 'shake' } })
+  const gesture = await host.request('POST', '/dsh-airpod-control/gesture', { body: { gesture: 'shake' } })
   assert.equal(gesture.body.decision, 'allowed-once')
   assert.equal(await answer, 'allowed-once')
 })
@@ -270,8 +290,8 @@ test('请求被中止（Esc / 停止）结算为 cancelled', async () => {
 test('一个请求只结算一次：结算之后再来的手势只报「没人在等」', async () => {
   const host = start()
   const answer = host.askApproval()
-  await host.request('POST', '/dsh-head-gesture/gesture', { body: { gesture: 'nod' } })
-  const again = await host.request('POST', '/dsh-head-gesture/gesture', { body: { gesture: 'shake' } })
+  await host.request('POST', '/dsh-airpod-control/gesture', { body: { gesture: 'nod' } })
+  const again = await host.request('POST', '/dsh-airpod-control/gesture', { body: { gesture: 'shake' } })
   assert.equal(again.body.accepted, false)
   assert.equal(await answer, 'allowed-once')
 })
@@ -280,44 +300,44 @@ test('已经有请求在等时，第二个请求交给下一个回答者', async
   const host = start()
   const first = host.askApproval({ callId: 'call-1' })
   assert.equal(host.askApproval({ callId: 'call-2' }), undefined)
-  await host.request('POST', '/dsh-head-gesture/gesture', { body: { gesture: 'nod' } })
+  await host.request('POST', '/dsh-airpod-control/gesture', { body: { gesture: 'nod' } })
   assert.equal(await first, 'allowed-once')
 })
 
 test('debounce 期间的手势被忽略', async () => {
   const host = start({ debounceMs: 5_000 })
   host.askApproval()
-  const first = await host.request('POST', '/dsh-head-gesture/gesture', { body: { gesture: 'nod' } })
+  const first = await host.request('POST', '/dsh-airpod-control/gesture', { body: { gesture: 'nod' } })
   assert.equal(first.body.accepted, true)
-  const second = await host.request('POST', '/dsh-head-gesture/gesture', { body: { gesture: 'nod' } })
+  const second = await host.request('POST', '/dsh-airpod-control/gesture', { body: { gesture: 'nod' } })
   assert.equal(second.status, 429)
 })
 
 test('/answer 是无耳机时的等价入口', async () => {
   const host = start()
   const answer = host.askApproval()
-  const result = await host.request('POST', '/dsh-head-gesture/answer', { body: { decision: 'allow' } })
+  const result = await host.request('POST', '/dsh-airpod-control/answer', { body: { decision: 'allow' } })
   assert.equal(result.body.decision, 'allowed-once')
   assert.equal(await answer, 'allowed-once')
 })
 
 test('非 POST / 未知手势 / 非法 body 都被挡住', async () => {
   const host = start()
-  assert.equal((await host.request('GET', '/dsh-head-gesture/gesture')).status, 405)
-  assert.equal((await host.request('POST', '/dsh-head-gesture/gesture', { body: { gesture: 'wiggle' } })).status, 400)
-  assert.equal((await host.request('POST', '/dsh-head-gesture/answer', { body: { decision: 'maybe' } })).status, 400)
+  assert.equal((await host.request('GET', '/dsh-airpod-control/gesture')).status, 405)
+  assert.equal((await host.request('POST', '/dsh-airpod-control/gesture', { body: { gesture: 'wiggle' } })).status, 400)
+  assert.equal((await host.request('POST', '/dsh-airpod-control/answer', { body: { decision: 'maybe' } })).status, 400)
 })
 
 test('token 不对 / Host 不是回环 / 跨站都被挡住', async () => {
   const host = start()
-  assert.equal((await host.request('GET', '/dsh-head-gesture/state', { token: 'wrong' })).status, 401)
-  assert.equal((await host.request('GET', '/dsh-head-gesture/state', { token: null })).status, 401)
-  assert.equal((await host.request('GET', '/dsh-head-gesture/state', { host: 'evil.example:19387' })).status, 403)
+  assert.equal((await host.request('GET', '/dsh-airpod-control/state', { token: 'wrong' })).status, 401)
+  assert.equal((await host.request('GET', '/dsh-airpod-control/state', { token: null })).status, 401)
+  assert.equal((await host.request('GET', '/dsh-airpod-control/state', { host: 'evil.example:19387' })).status, 403)
 })
 
 test('/health 只做自检，不回报 token 本身', async () => {
   const host = start()
-  const health = await host.request('GET', '/dsh-head-gesture/health')
+  const health = await host.request('GET', '/dsh-airpod-control/health')
   assert.equal(health.body.ok, true)
   assert.equal(health.body.hasToken, true)
   assert.equal(health.body.hasApprovalAnswerer, true)
@@ -337,12 +357,12 @@ test('卸载时把挂着的请求结算掉，不留死 Promise', async () => {
 test('点头＝是：选中的是「同意」那一个选项', async () => {
   const host = start()
   const answer = host.askQuestion()
-  const waiting = await host.request('GET', '/dsh-head-gesture/state')
+  const waiting = await host.request('GET', '/dsh-airpod-control/state')
   assert.equal(waiting.body.waiting, true)
   assert.equal(waiting.body.kind, 'question')
   assert.equal(waiting.body.label, '要现在部署吗？')
 
-  const gesture = await host.request('POST', '/dsh-head-gesture/gesture', { body: { gesture: 'nod', ttlMs: 1_000 } })
+  const gesture = await host.request('POST', '/dsh-airpod-control/gesture', { body: { gesture: 'nod', ttlMs: 1_000 } })
   assert.equal(gesture.body.accepted, true)
   assert.deepEqual(await answer, { answers: [{ id: 'q1', selected: ['是，部署'] }] })
 })
@@ -350,7 +370,7 @@ test('点头＝是：选中的是「同意」那一个选项', async () => {
 test('摇头＝否：选中的是「否定」那一个选项', async () => {
   const host = start()
   const answer = host.askQuestion()
-  const gesture = await host.request('POST', '/dsh-head-gesture/gesture', { body: { gesture: 'shake', ttlMs: 1_000 } })
+  const gesture = await host.request('POST', '/dsh-airpod-control/gesture', { body: { gesture: 'shake', ttlMs: 1_000 } })
   assert.equal(gesture.body.answers[0].selected[0], '先不部署')
   assert.deepEqual(await answer, { answers: [{ id: 'q1', selected: ['先不部署'] }] })
 })
@@ -369,7 +389,7 @@ test('模型声明了 intent.approve 时以它为准（即使它在最后一项�
       },
     ],
   })
-  await host.request('POST', '/dsh-head-gesture/gesture', { body: { gesture: 'nod', ttlMs: 1_000 } })
+  await host.request('POST', '/dsh-airpod-control/gesture', { body: { gesture: 'nod', ttlMs: 1_000 } })
   assert.deepEqual(await answer, { answers: [{ id: 'q1', selected: ['允许'] }] })
 })
 
@@ -387,7 +407,7 @@ test('intent 说第一项是「同意」时，点头选第一项、摇头选另�
       },
     ],
   })
-  await host.request('POST', '/dsh-head-gesture/gesture', { body: { gesture: 'nod', ttlMs: 1_000 } })
+  await host.request('POST', '/dsh-airpod-control/gesture', { body: { gesture: 'nod', ttlMs: 1_000 } })
   assert.deepEqual(await answer, { answers: [{ id: 'q1', selected: ['直接发'] }] })
 
   const other = start()
@@ -401,7 +421,7 @@ test('intent 说第一项是「同意」时，点头选第一项、摇头选另�
       },
     ],
   })
-  await other.request('POST', '/dsh-head-gesture/gesture', { body: { gesture: 'shake', ttlMs: 1_000 } })
+  await other.request('POST', '/dsh-airpod-control/gesture', { body: { gesture: 'shake', ttlMs: 1_000 } })
   assert.deepEqual(await answer2, { answers: [{ id: 'q1', selected: ['先跑测试'] }] })
 })
 
@@ -417,7 +437,7 @@ test('/answer 可以直接点名某一项（手势表达不了的那种选择）
       },
     ],
   })
-  const res = await host.request('POST', '/dsh-head-gesture/answer', { body: { decision: 'select:2' } })
+  const res = await host.request('POST', '/dsh-airpod-control/answer', { body: { decision: 'select:2' } })
   assert.equal(res.status, 200)
   assert.deepEqual(res.body.answers, [{ id: 'q1', selected: ['先不动'] }])
   assert.deepEqual(await answer, { answers: [{ id: 'q1', selected: ['先不动'] }] })
@@ -429,7 +449,7 @@ test('/answer 点名越界或对没有选项的题点名时都是 400，不会�
   host.askQuestion({
     questions: [{ id: 'q1', question: '用哪种方案？', options: [{ label: '保守' }, { label: '激进' }] }],
   })
-  const out = await host.request('POST', '/dsh-head-gesture/answer', { body: { decision: 'select:9' } })
+  const out = await host.request('POST', '/dsh-airpod-control/answer', { body: { decision: 'select:9' } })
   assert.equal(out.status, 400)
   assert.equal(out.body.accepted, false)
   // 明确「不是过期，是你点错了」：卡片据此决定要不要刷新
@@ -439,18 +459,18 @@ test('/answer 点名越界或对没有选项的题点名时都是 400，不会�
 test('nodAllows=false 时提问也跟着反过来', async () => {
   const host = start({ nodAllows: false })
   const answer = host.askQuestion()
-  await host.request('POST', '/dsh-head-gesture/gesture', { body: { gesture: 'shake', ttlMs: 1_000 } })
+  await host.request('POST', '/dsh-airpod-control/gesture', { body: { gesture: 'shake', ttlMs: 1_000 } })
   assert.deepEqual(await answer, { answers: [{ id: 'q1', selected: ['是，部署'] }] })
 })
 
 test('自由文本提问没有选项：点头/摇头落成自定义回答', async () => {
   const host = start()
   const answer = host.askQuestion({ questions: [{ id: 'q1', question: '这一版叫什么名字？' }] })
-  await host.request('POST', '/dsh-head-gesture/gesture', { body: { gesture: 'nod', ttlMs: 1_000 } })
+  await host.request('POST', '/dsh-airpod-control/gesture', { body: { gesture: 'nod', ttlMs: 1_000 } })
   assert.deepEqual(await answer, { answers: [{ id: 'q1', selected: [], custom: '是' }] })
   const shakeHost = start()
   const shakeAnswer = shakeHost.askQuestion({ questions: [{ id: 'q1', question: '这一版叫什么名字？' }] })
-  await shakeHost.request('POST', '/dsh-head-gesture/gesture', { body: { gesture: 'shake', ttlMs: 1_000 } })
+  await shakeHost.request('POST', '/dsh-airpod-control/gesture', { body: { gesture: 'shake', ttlMs: 1_000 } })
   assert.deepEqual(await shakeAnswer, { answers: [{ id: 'q1', selected: [], custom: '否' }] })
 })
 
@@ -466,7 +486,7 @@ test('多选题：点头＝全选，摇头＝全不选', async () => {
       },
     ],
   })
-  await host.request('POST', '/dsh-head-gesture/gesture', { body: { gesture: 'shake', ttlMs: 1_000 } })
+  await host.request('POST', '/dsh-airpod-control/gesture', { body: { gesture: 'shake', ttlMs: 1_000 } })
   assert.deepEqual(await answer, { answers: [{ id: 'q1', selected: [] }] })
 })
 
@@ -478,7 +498,7 @@ test('一批多个问题：一次手势把整批答完，逐题按自己的选�
       { id: 'q2', question: '另外开一个窗口吗？', options: [{ label: '是' }, { label: '否' }] },
     ],
   })
-  await host.request('POST', '/dsh-head-gesture/gesture', { body: { gesture: 'nod', ttlMs: 1_000 } })
+  await host.request('POST', '/dsh-airpod-control/gesture', { body: { gesture: 'nod', ttlMs: 1_000 } })
   assert.deepEqual(await answer, {
     answers: [
       { id: 'q1', selected: ['继续'] },
@@ -504,7 +524,7 @@ test('选项多于八个、或 claimQuestions=off：交给下一个回答者（�
 
   const off = start({ claimQuestions: 'off' })
   assert.equal(off.askQuestion(), undefined)
-  assert.equal((await off.request('GET', '/dsh-head-gesture/health')).body.hasQuestionAnswerer, false)
+  assert.equal((await off.request('GET', '/dsh-airpod-control/health')).body.hasQuestionAnswerer, false)
 })
 
 // ── 多选项：摇头切换、点头确认 ──────────────────────────────────────────
@@ -520,18 +540,18 @@ test('多选项：摇一次到第二项，点头＝第二项（/state 能看到�
   t.after(() => host.stop())
   const answer = host.askQuestion(threeOptions())
 
-  const shake = await host.request('POST', '/dsh-head-gesture/gesture', { body: { gesture: 'shake' } })
+  const shake = await host.request('POST', '/dsh-airpod-control/gesture', { body: { gesture: 'shake' } })
   assert.equal(shake.body.accepted, true)
   assert.equal(shake.body.pending, true)
   assert.equal(shake.body.cursor, 1)
   assert.equal(shake.body.selectedLabel, '乙')
 
-  const state = await host.request('GET', '/dsh-head-gesture/state')
+  const state = await host.request('GET', '/dsh-airpod-control/state')
   assert.equal(state.body.question.cursor, 1)
   assert.equal(state.body.question.selectedLabel, '乙')
   assert.equal(state.body.waiting, true)
 
-  const nod = await host.request('POST', '/dsh-head-gesture/gesture', { body: { gesture: 'nod' } })
+  const nod = await host.request('POST', '/dsh-airpod-control/gesture', { body: { gesture: 'nod' } })
   assert.equal(nod.body.decision, 'answer')
   assert.deepEqual(await answer, { answers: [{ id: 'q1', selected: ['乙'] }] })
 })
@@ -541,7 +561,7 @@ test('/cursor 免 token 就能读到「现在会选第几项」，且不泄露�
   t.after(() => host.stop())
   host.askQuestion(threeOptions())
 
-  const idle = await host.request('GET', '/dsh-head-gesture/cursor', { token: null })
+  const idle = await host.request('GET', '/dsh-airpod-control/cursor', { token: null })
   assert.equal(idle.status, 200)
   assert.equal(idle.body.waiting, true)
   assert.equal(idle.body.index, 1)
@@ -549,8 +569,8 @@ test('/cursor 免 token 就能读到「现在会选第几项」，且不泄露�
   assert.equal(idle.body.option, '甲')
   assert.equal(idle.body.question, undefined)
 
-  await host.request('POST', '/dsh-head-gesture/gesture', { body: { gesture: 'shake' } })
-  const moved = await host.request('GET', '/dsh-head-gesture/cursor', { token: null })
+  await host.request('POST', '/dsh-airpod-control/gesture', { body: { gesture: 'shake' } })
+  const moved = await host.request('GET', '/dsh-airpod-control/cursor', { token: null })
   assert.equal(moved.body.index, 2)
   assert.equal(moved.body.option, '乙')
   assert.equal(moved.body.kind, 'question')
@@ -560,20 +580,20 @@ test('多选项：不动就点头＝第一项；摇满一圈回到第一项', as
   const plain = start()
   t.after(() => plain.stop())
   const first = plain.askQuestion(threeOptions())
-  const state0 = await plain.request('GET', '/dsh-head-gesture/state')
+  const state0 = await plain.request('GET', '/dsh-airpod-control/state')
   assert.equal(state0.body.question.cursor, 0)
-  await plain.request('POST', '/dsh-head-gesture/gesture', { body: { gesture: 'nod' } })
+  await plain.request('POST', '/dsh-airpod-control/gesture', { body: { gesture: 'nod' } })
   assert.deepEqual(await first, { answers: [{ id: 'q1', selected: ['甲'] }] })
 
   const wrap = start()
   t.after(() => wrap.stop())
   const second = wrap.askQuestion(threeOptions())
   for (let index = 0; index < 3; index += 1) {
-    await wrap.request('POST', '/dsh-head-gesture/gesture', { body: { gesture: 'shake' } })
+    await wrap.request('POST', '/dsh-airpod-control/gesture', { body: { gesture: 'shake' } })
   }
-  const state = await wrap.request('GET', '/dsh-head-gesture/state')
+  const state = await wrap.request('GET', '/dsh-airpod-control/state')
   assert.equal(state.body.question.cursor, 0)
-  await wrap.request('POST', '/dsh-head-gesture/gesture', { body: { gesture: 'nod' } })
+  await wrap.request('POST', '/dsh-airpod-control/gesture', { body: { gesture: 'nod' } })
   assert.deepEqual(await second, { answers: [{ id: 'q1', selected: ['甲'] }] })
 })
 
@@ -582,11 +602,11 @@ test('多选项：点头之前一直挂着，摇几次只移动光标', async (t
   t.after(() => host.stop())
   host.askQuestion(threeOptions())
   for (let index = 0; index < 4; index += 1) {
-    const res = await host.request('POST', '/dsh-head-gesture/gesture', { body: { gesture: 'shake' } })
+    const res = await host.request('POST', '/dsh-airpod-control/gesture', { body: { gesture: 'shake' } })
     assert.equal(res.body.accepted, true)
     assert.equal(res.body.pending, true)
   }
-  const state = await host.request('GET', '/dsh-head-gesture/state')
+  const state = await host.request('GET', '/dsh-airpod-control/state')
   assert.equal(state.body.question.cursor, 4 % 3)
   assert.equal(state.body.waiting, true)
 })
@@ -604,9 +624,9 @@ test('计划审查题：光标从「同意」那一项开始', async (t) => {
       },
     ],
   })
-  const state = await host.request('GET', '/dsh-head-gesture/state')
+  const state = await host.request('GET', '/dsh-airpod-control/state')
   assert.equal(state.body.question.cursor, 1)
-  await host.request('POST', '/dsh-head-gesture/gesture', { body: { gesture: 'nod' } })
+  await host.request('POST', '/dsh-airpod-control/gesture', { body: { gesture: 'nod' } })
   assert.deepEqual(await answer, { answers: [{ id: 'q1', selected: ['开始实施'] }] })
 })
 
@@ -618,7 +638,7 @@ test('提问没人答：超时按 ASK_TIMED_OUT 抛，工具会返回 pending �
     assert.equal(err.code, 'ASK_TIMED_OUT')
     return true
   })
-  assert.equal((await host.request('GET', '/dsh-head-gesture/state')).body.waiting, false)
+  assert.equal((await host.request('GET', '/dsh-airpod-control/state')).body.waiting, false)
 })
 
 test('提问被中止（Esc / 停止）时抛 ASK_CANCELLED，而不是把 undefined 交回宿主', async () => {
@@ -627,27 +647,27 @@ test('提问被中止（Esc / 停止）时抛 ASK_CANCELLED，而不是把 undef
   const host = start()
   const controller = new AbortController()
   const answer = host.askQuestion({ signal: controller.signal })
-  assert.equal((await host.request('GET', '/dsh-head-gesture/state')).body.waiting, true)
+  assert.equal((await host.request('GET', '/dsh-airpod-control/state')).body.waiting, true)
   controller.abort()
   await assert.rejects(answer, (err) => {
     assert.equal(err.name, 'UserQuestionError')
     assert.equal(err.code, 'ASK_CANCELLED')
     return true
   })
-  assert.equal((await host.request('GET', '/dsh-head-gesture/state')).body.waiting, false)
+  assert.equal((await host.request('GET', '/dsh-airpod-control/state')).body.waiting, false)
 })
 
 test('网页卡片按 requestId 回答：过期的 id 会被 409 挡住，不误答新问题', async () => {
   const host = start()
   const answer = host.askQuestion()
-  const stale = await host.request('POST', '/dsh-head-gesture/gesture', {
+  const stale = await host.request('POST', '/dsh-airpod-control/gesture', {
     body: { gesture: 'nod', requestId: 'q999' },
   })
   assert.equal(stale.status, 409)
   assert.equal(stale.body.stale, true)
 
-  const live = (await host.request('GET', '/dsh-head-gesture/state')).body.question.requestId
-  const ok = await host.request('POST', '/dsh-head-gesture/answer', { body: { decision: 'allow', requestId: live } })
+  const live = (await host.request('GET', '/dsh-airpod-control/state')).body.question.requestId
+  const ok = await host.request('POST', '/dsh-airpod-control/answer', { body: { decision: 'allow', requestId: live } })
   assert.equal(ok.body.accepted, true)
   assert.deepEqual(await answer, { answers: [{ id: 'q1', selected: ['是，部署'] }] })
 })
@@ -656,12 +676,12 @@ test('提问优先于审批：两边都在等时，手势先答提问', async ()
   const host = start()
   const approval = host.askApproval()
   const question = host.askQuestion()
-  const gesture = await host.request('POST', '/dsh-head-gesture/gesture', { body: { gesture: 'nod', ttlMs: 1_000 } })
+  const gesture = await host.request('POST', '/dsh-airpod-control/gesture', { body: { gesture: 'nod', ttlMs: 1_000 } })
   assert.equal(gesture.body.decision, 'nod')
   await question
   // 审批还挂着，还需要一次手势
-  assert.equal((await host.request('GET', '/dsh-head-gesture/state')).body.kind, 'approval')
-  await host.request('POST', '/dsh-head-gesture/gesture', { body: { gesture: 'nod', ttlMs: 1_000 } })
+  assert.equal((await host.request('GET', '/dsh-airpod-control/state')).body.kind, 'approval')
+  await host.request('POST', '/dsh-airpod-control/gesture', { body: { gesture: 'nod', ttlMs: 1_000 } })
   assert.equal(await approval, 'allowed-once')
 })
 
@@ -673,16 +693,16 @@ test('HeadOrbit 从没轮询过：请求原样交给网页卡片，手势槽也�
   assert.equal(host.askQuestion(), undefined)
   assert.equal(host.browserCalls(), 0)
   // 网页自己也答不上来时，插件不该是那个把结论定成 rejection 的人
-  const state = (await host.request('GET', '/dsh-head-gesture/state')).body
+  const state = (await host.request('GET', '/dsh-airpod-control/state')).body
   assert.equal(state.waiting, false)
   assert.equal(state.headOrbit.alive, false)
 })
 
 test('HeadOrbit 掉线（超过 aliveWindowMs 没轮询）后同样让位', async () => {
   const host = start({ aliveWindowMs: 1_000 })
-  assert.equal((await host.request('GET', '/dsh-head-gesture/state')).body.headOrbit.alive, true)
+  assert.equal((await host.request('GET', '/dsh-airpod-control/state')).body.headOrbit.alive, true)
   await new Promise((r) => setTimeout(r, 1_100))
-  assert.equal((await host.request('GET', '/dsh-head-gesture/state')).body.headOrbit.alive, false)
+  assert.equal((await host.request('GET', '/dsh-airpod-control/state')).body.headOrbit.alive, false)
   // 注意：这次 /state 又把它算成在线了（轮询即心跳），所以先派发再断言
   const offline = start({ aliveWindowMs: 1_000 })
   await new Promise((r) => setTimeout(r, 1_100))
@@ -693,10 +713,10 @@ test('requireHeadOrbit=false 时不等心跳：没有 HeadOrbit 也能用手势�
   const host = start({ requireHeadOrbit: false, headOrbitOnline: false })
   const approval = host.askApproval()
   assert.notEqual(approval, undefined)
-  await host.request('POST', '/dsh-head-gesture/gesture', { body: { gesture: 'nod', ttlMs: 1_000 } })
+  await host.request('POST', '/dsh-airpod-control/gesture', { body: { gesture: 'nod', ttlMs: 1_000 } })
   assert.equal(await approval, 'allowed-once')
   // 心跳状态本身照实上报，只是不再拿它当门槛
-  const state = (await host.request('GET', '/dsh-head-gesture/state')).body
+  const state = (await host.request('GET', '/dsh-airpod-control/state')).body
   assert.equal(state.headOrbit.required, false)
 })
 
@@ -707,7 +727,7 @@ test('认领的同时仍然调用 next()，让网页卡片照常渲染', async (
   const approval = host.askApproval()
   assert.notEqual(approval, undefined)
   assert.equal(host.browserCalls(), 1)
-  await host.request('POST', '/dsh-head-gesture/gesture', { body: { gesture: 'nod', ttlMs: 1_000 } })
+  await host.request('POST', '/dsh-airpod-control/gesture', { body: { gesture: 'nod', ttlMs: 1_000 } })
   assert.equal(await approval, 'allowed-once')
 })
 
@@ -716,7 +736,7 @@ test('网页卡片先点了「拒绝」：以网页为准，之后的手势不�
   host.setBrowserMode('reject')
   const approval = host.askApproval()
   assert.equal(await approval, 'rejected')
-  const after = await host.request('POST', '/dsh-head-gesture/gesture', { body: { gesture: 'nod', ttlMs: 1_000 } })
+  const after = await host.request('POST', '/dsh-airpod-control/gesture', { body: { gesture: 'nod', ttlMs: 1_000 } })
   assert.equal(after.body.accepted, false)
   assert.equal(after.body.reason, 'nothing is waiting for a decision')
 })
@@ -725,7 +745,7 @@ test('网页那一路返回 unavailable（没有回答者）时，手势仍然�
   const host = start()
   host.setBrowserMode('unavailable')
   const approval = host.askApproval()
-  await host.request('POST', '/dsh-head-gesture/gesture', { body: { gesture: 'nod', ttlMs: 1_000 } })
+  await host.request('POST', '/dsh-airpod-control/gesture', { body: { gesture: 'nod', ttlMs: 1_000 } })
   assert.equal(await approval, 'allowed-once')
 })
 
@@ -734,7 +754,7 @@ test('提问也一样：网页卡片先答就以网页为准', async () => {
   host.setBrowserMode('allow')
   const answer = host.askQuestion()
   assert.equal(await answer, 'allowed-once')
-  const state = (await host.request('GET', '/dsh-head-gesture/state')).body
+  const state = (await host.request('GET', '/dsh-airpod-control/state')).body
   assert.equal(state.waiting, false)
   assert.equal(state.ignored >= 1, true)
 })
@@ -746,7 +766,7 @@ test('审批卡片上会印上「点头＝允许 / 摇头＝拒绝」的提示',
   const answer = host.askApproval()
   assert.ok(answer.$request.displayReason.includes('点头＝允许'))
 
-  const gesture = await host.request('POST', '/dsh-head-gesture/gesture', { body: { gesture: 'nod', ttlMs: 1_000 } })
+  const gesture = await host.request('POST', '/dsh-airpod-control/gesture', { body: { gesture: 'nod', ttlMs: 1_000 } })
   assert.equal(gesture.body.accepted, true)
   assert.equal(await answer, 'allowed-once')
 })
@@ -758,7 +778,7 @@ test('请求自带 displayReason 时不覆盖', async (t) => {
   const answer = host.askApproval({ displayReason: 'host 自己的说明' })
   assert.equal(answer.$request.displayReason, 'host 自己的说明')
 
-  const gesture = await host.request('POST', '/dsh-head-gesture/gesture', { body: { gesture: 'shake', ttlMs: 1_000 } })
+  const gesture = await host.request('POST', '/dsh-airpod-control/gesture', { body: { gesture: 'shake', ttlMs: 1_000 } })
   assert.equal(gesture.body.accepted, true)
   assert.equal(await answer, 'rejected')
 })

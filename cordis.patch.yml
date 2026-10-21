@@ -1,17 +1,17 @@
-# dsh-head-gesture 的组装补丁：只声明这一行的存在与安全默认值。
+# dsh-airpod-control 的组装补丁：只声明这一行的存在与安全默认值。
 #
 # 默认关着、也没有共享密钥 —— 别人装上不会自己生效。真正启用的取值放在
 # profile 的用户层（~/.dsh/profiles/<profile>/cordis.patch.yml）:
 #
-#   - id: dsh-head-gesture
+#   - id: dsh-airpod-control
 #     config:
 #       enabled: true
 #       token: <和 HeadOrbit「DSH」设置页里填的同一个随机串>
 #
 # token 是本地共享密钥：没有它，本机任何进程都能伪造一次「点头」。
 - insert:
-    - id: dsh-head-gesture
-      name: 'dsh-head-gesture'
+    - id: dsh-airpod-control
+      name: 'dsh-airpod-control'
       config:
         enabled: false
         token: ''

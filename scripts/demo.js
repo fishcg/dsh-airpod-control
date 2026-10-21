@@ -65,7 +65,7 @@ const server = http.createServer(async (req, res) => {
 })
 
 await new Promise((resolve) => server.listen(PORT, '127.0.0.1', resolve))
-const base = `http://127.0.0.1:${PORT}/dsh-head-gesture`
+const base = `http://127.0.0.1:${PORT}/dsh-airpod-control`
 console.log(`假宿主已起在 ${base}\n`)
 
 if (printCurlOnly) {

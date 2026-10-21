@@ -1,4 +1,4 @@
-# dsh-head-gesture
+# dsh-airpod-control
 
 用头部手势回答 DeepSeek Harness 的两件事，同一套动作：
 
@@ -9,6 +9,24 @@
 
 手势由 [HeadOrbit](https://github.com/Cogria-AI/HeadOrbit)（AirPods 头部追踪的 macOS 菜单栏 App）识别，
 通过本机回环 HTTP 送到这个插件；插件分别注册成审批回答者与提问回答者（approval / user-questions answerer）。
+
+## 装好它（不用手动下载 App）
+
+插件自带安装器：HeadOrbit 没装、或装了没连上时，DSH 页面右下角会出现一张卡片，
+点「一键安装并配置」即可 —— 下载、装到 `~/Applications`、把端口和 token 写进它的偏好、启动、等心跳，
+全部自动完成。系统权限（「动作与健身」）只能由系统弹窗授予，卡片上给了直接跳到系统设置的按钮。
+
+不想点卡片也可以一条命令：
+
+```bash
+# <port> 就是 DSH 的 web 端口（浏览器地址栏里那个）
+curl -s -X POST "http://127.0.0.1:<port>/dsh-airpod-control/setup/run" | jq
+```
+
+共享 token 也不需要你手填：配置里留空时会自动生成一份，落在 `~/.dsh-airpod-control/token`
+（0600），安装器会把同一个值写进 HeadOrbit。
+
+<img src="docs/install-card.png" alt="一键安装卡片" width="420">
 
 - **手势和网页按钮同时有效，谁先到算谁的**：认领请求的同时也调用 `next()`，所以网页那张卡片照常
   渲染；你在页面上点「允许」和做一个手势是在赛跑。没有回答者时 DSH 本来就是 fail closed，本插件不改变这个性质。
@@ -31,16 +49,16 @@
 
 ```jsonc
 // package.json
-"dependencies": { "dsh-head-gesture": "link:/Users/fish/dsh-head-gesture" },
-"dsh": { "profile": { "bundles": ["...", "dsh-head-gesture"] } }
+"dependencies": { "dsh-airpod-control": "link:/Users/fish/dsh-airpod-control" },
+"dsh": { "profile": { "bundles": ["...", "dsh-airpod-control"] } }
 ```
 
 ```yaml
 # cordis.patch.yml —— 插件那一行由它自己的 bundle 补丁插入，这里只覆盖本机取值
-- id: dsh-head-gesture
+- id: dsh-airpod-control
   config:
     enabled: true
-    token: <和 HeadOrbit 里填的同一个随机串>
+    # token 可以留空：插件会自己生成一份并写进 HeadOrbit
 ```
 
 然后 `CI=true pnpm install` 并重启 DSH。（`package.json` 里的依赖是 `link:` 时不用重新装，
@@ -55,7 +73,7 @@
 | 键 | 默认 | 说明 |
 | --- | --- | --- |
 | `enabled` | `false` | 关着的时候什么都不注册，等于没装 |
-| `token` | `''` | 共享密钥。**为空就完全不认领请求**；非空时要求请求带 `X-HeadOrbit-Token` |
+| `token` | `''` | 共享密钥。留空则自动生成到 `~/.dsh-airpod-control/token`（0600）；非空时以配置为准。请求需带 `X-HeadOrbit-Token` |
 | `nodAllows` | `true` | `false` 则反过来：摇头＝允许、点头＝拒绝（提问也一起反过来） |
 | `claimQuestions` | `'auto'` | `'off'` 则完全不接模型的提问，只回答权限许可 |
 | `questionTimeoutMs` | `600000` | 提问没人答时多久按「超时」结算（工具据此返回 pending，不卡死这一轮） |
@@ -71,8 +89,9 @@
 
 ## 端点
 
-全部挂在 `/dsh-head-gesture` 前缀下，复用宿主已有的 webServer 路由（因此只听 127.0.0.1）。
-除 Host / 同站检查之外，都需要 `X-HeadOrbit-Token`。
+全部挂在 `/dsh-airpod-control` 前缀下，复用宿主已有的 webServer 路由（因此只听 127.0.0.1）。
+除 Host / 同站检查之外，都需要 `X-HeadOrbit-Token`；标了**免 token** 的那几个是给浏览器半区用的，
+只读且不含会话内容。
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
@@ -83,6 +102,9 @@
 | `GET` | `/cursor` | **免 token**：当前光标落在第几项（只回序号与那一项的文字） |
 | `POST` | `/gesture` | `{ "gesture": "nod" \| "shake", "ttlMs": 2000, "requestId"?: "q1" }` |
 | `POST` | `/answer` | `{ "decision": "allow" \| "reject" \| "select:N", "requestId"?: "q1" }`，没有耳机时的等价入口；`select:N` 直接点名第 N 个选项 |
+| `GET` | `/setup` | **免 token**：`{ app: { installed, running }, bridge, alive, tokenConfigured, last, running }`，安装卡片靠它决定要不要出现 |
+| `POST` | `/setup/run` | **免 token**：下载 + 安装 + 写配置 + 启动 + 等心跳；`{ reinstall?: true }`。返回逐步状态 `steps[]` |
+| `POST` | `/setup/motion` | **免 token**：打开系统设置的「动作与健身」隐私页 |
 
 `/state` 里 `kind` 是 `"approval"` 或 `"question"`；等提问时 `question` 会带上题目与选项
 （`{ requestId, label, count, questions, deadlineAt }`）。浏览器半区拿 `question.cursor`
@@ -95,11 +117,15 @@
 端口就是 DSH 自己的 GUI 端口（`dsh web` 启动时打印的那个）；插件不开新端口。
 
 ```console
-$ curl -s -H "X-HeadOrbit-Token: $TOKEN" http://127.0.0.1:$DSH_WEB_PORT/dsh-head-gesture/health
-{"ok":true,"plugin":"dsh-head-gesture","version":"0.1.1","hasToken":true,"hasApprovalAnswerer":true,"hasQuestionAnswerer":true,"headOrbitAlive":true,"headOrbitWindowMs":6000,"waiting":false,"waitingKind":null,"answered":3,"ignored":0}
+$ curl -s -H "X-HeadOrbit-Token: $TOKEN" http://127.0.0.1:$DSH_WEB_PORT/dsh-airpod-control/health
+{"ok":true,"plugin":"dsh-airpod-control","version":"0.2.0","hasToken":true,"hasApprovalAnswerer":true,"hasQuestionAnswerer":true,"headOrbitAlive":true,"headOrbitWindowMs":6000,"waiting":false,"waitingKind":null,"answered":3,"ignored":0}
 ```
 
 ## 安全性（值得说清楚）
+
+- `/setup*` 是免 token 的（浏览器拿不到 token），因此只接受**回环 Host + 同站请求**；
+  它做的都是固定参数的本机动作（`defaults` / `ditto` / `open`），请求内容不会进 shell。
+  装上之后，任何本机进程仍然可以调它重装 —— 这在能读你用户目录的进程面前不算新增权限。
 
 这是「从本机网络改变一次授权决定」，所以：
 
