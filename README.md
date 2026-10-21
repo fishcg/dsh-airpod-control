@@ -28,7 +28,7 @@ dsh plugin --profile desktop add dsh-airpod-control
 ```
 
 > `--profile` 换成你实际在用的那个（桌面版默认 `desktop`，`dsh web` 是 `web`）。
-> npm 包：<https://www.npmjs.com/package/dsh-airpod-control>，当前版本 `0.2.0`。
+> npm 包：<https://www.npmjs.com/package/dsh-airpod-control>，当前版本 `0.3.0`。
 
 想改代码就从源码装：
 
@@ -154,7 +154,7 @@ id 对不上会得到 `409 { stale: true }`。
 
 ```console
 $ curl -s -H "X-HeadOrbit-Token: $TOKEN" http://127.0.0.1:$DSH_WEB_PORT/dsh-airpod-control/health
-{"ok":true,"plugin":"dsh-airpod-control","version":"0.2.0","hasToken":true,"hasApprovalAnswerer":true,"hasQuestionAnswerer":true,"headOrbitAlive":true,"headOrbitWindowMs":6000,"waiting":false,"waitingKind":null,"answered":3,"ignored":0}
+{"ok":true,"plugin":"dsh-airpod-control","version":"0.3.0","hasToken":true,"hasApprovalAnswerer":true,"hasQuestionAnswerer":true,"headOrbitAlive":true,"headOrbitWindowMs":6000,"waiting":false,"waitingKind":null,"answered":3,"ignored":0}
 ```
 
 端口就是 DSH 自己的 GUI 端口（`dsh web` 启动时打印的那个）；插件不开新端口。
