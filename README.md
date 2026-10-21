@@ -23,15 +23,19 @@
 
 ## 安装
 
-还没发到 npm，先按源码装（两行）：
+```bash
+dsh plugin --profile desktop add dsh-airpod-control
+```
+
+> `--profile` 换成你实际在用的那个（桌面版默认 `desktop`，`dsh web` 是 `web`）。
+> npm 包：<https://www.npmjs.com/package/dsh-airpod-control>，当前版本 `0.2.0`。
+
+想改代码就从源码装：
 
 ```bash
 git clone https://github.com/fishcg/dsh-airpod-control.git ~/dsh-airpod-control
 dsh plugin --profile desktop add link:~/dsh-airpod-control
 ```
-
-> `--profile` 换成你实际在用的那个（桌面版默认 `desktop`，`dsh web` 是 `web`）。
-> npm 发布之后这里会变成一行 `dsh plugin --profile desktop add dsh-airpod-control`。
 
 装完重启 DSH，打开任意会话，右下角会出现「用点头 / 摇头回答 DSH」的卡片，点一下即可：
 
